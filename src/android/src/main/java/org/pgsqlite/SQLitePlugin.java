@@ -9,18 +9,20 @@ package org.pgsqlite;
 
 import android.annotation.SuppressLint;
 import android.database.Cursor;
+import android.database.CursorWindow;
+import android.database.sqlite.SQLiteCursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteException;
 import android.database.sqlite.SQLiteStatement;
 import android.content.Context;
+import android.os.Bundle;
 import android.util.Base64;
+import android.util.Log;
 
-import java.io.Closeable;
 import java.io.File;
 import java.io.FileInputStream;
 import java.lang.IllegalArgumentException;
 import java.lang.Number;
-import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
@@ -29,7 +31,6 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import com.facebook.common.logging.FLog;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
@@ -48,11 +49,20 @@ import java.io.IOException;
 
 public class SQLitePlugin extends ReactContextBaseJavaModule {
 
-    public static final String TAG = SQLitePlugin.class.getSimpleName();
-
     private static final String PLUGIN_NAME = "SQLite";
 
+    private static final String LOG_TAG = SQLitePlugin.class.getSimpleName();
+
     private static final Pattern FIRST_WORD = Pattern.compile("^\\s*(\\S+)",
+            Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern WHERE_CLAUSE = Pattern.compile("\\s+WHERE\\s+(.+)$",
+            Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern UPDATE_TABLE_NAME = Pattern.compile("^\\s*UPDATE\\s+(\\S+)",
+            Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern DELETE_TABLE_NAME = Pattern.compile("^\\s*DELETE\\s+FROM\\s+(\\S+)",
             Pattern.CASE_INSENSITIVE);
 
     /**
@@ -202,7 +212,7 @@ public class SQLitePlugin extends ReactContextBaseJavaModule {
             action = Action.valueOf(actionAsString);
         } catch (IllegalArgumentException e) {
             // shouldn't ever happen
-            FLog.e(TAG, "unexpected error", e);
+            Log.e(SQLitePlugin.class.getSimpleName(), "unexpected error", e);
             throw(e);
         }
 
@@ -210,7 +220,7 @@ public class SQLitePlugin extends ReactContextBaseJavaModule {
             return executeAndPossiblyThrow(action, args, cbc);
         } catch (JSONException e) {
             // TODO: signal JSON problem to JS
-            FLog.e(TAG, "unexpected error", e);
+            Log.e(SQLitePlugin.class.getSimpleName(), "unexpected error", e);
             throw(e);
         }
     }
@@ -295,7 +305,7 @@ public class SQLitePlugin extends ReactContextBaseJavaModule {
                     try {
                         r.q.put(q);
                     } catch(Exception e) {
-                        FLog.e(TAG, "couldn't add to queue", e);
+                        Log.e(SQLitePlugin.class.getSimpleName(), "couldn't add to queue", e);
                         cbc.error("couldn't add to queue");
                     }
                 } else {
@@ -321,7 +331,7 @@ public class SQLitePlugin extends ReactContextBaseJavaModule {
                 // stop the db runner thread:
                 r.q.put(new DBQuery());
             } catch(Exception ex) {
-                FLog.e(TAG, "couldn't stop db thread for db: " + dbname,ex);
+                Log.e(SQLitePlugin.class.getSimpleName(), "couldn't stop db thread for db: " + dbname,ex);
             }
             dbrmap.remove(dbname);
         }
@@ -354,7 +364,6 @@ public class SQLitePlugin extends ReactContextBaseJavaModule {
             this.getThreadPool().execute(r);
         }
     }
-
     /**
      * Open a database.
      *
@@ -381,20 +390,20 @@ public class SQLitePlugin extends ReactContextBaseJavaModule {
                 if (assetFilePath.compareTo("1") == 0) {
                     assetFilePath = "www/" + dbname;
                     in = this.getContext().getAssets().open(assetFilePath);
-                    FLog.v(TAG, "Located pre-populated DB asset in app bundle www subdirectory: " + assetFilePath);
+                    Log.v("info", "Located pre-populated DB asset in app bundle www subdirectory: " + assetFilePath);
                 } else if (assetFilePath.charAt(0) == '~') {
                     assetFilePath = assetFilePath.startsWith("~/") ? assetFilePath.substring(2) : assetFilePath.substring(1);
                     in = this.getContext().getAssets().open(assetFilePath);
-                    FLog.v(TAG, "Located pre-populated DB asset in app bundle subdirectory: " + assetFilePath);
+                    Log.v("info", "Located pre-populated DB asset in app bundle subdirectory: " + assetFilePath);
                 } else {
                     File filesDir = this.getContext().getFilesDir();
                     assetFilePath = assetFilePath.startsWith("/") ? assetFilePath.substring(1) : assetFilePath;
                     File assetFile = new File(filesDir, assetFilePath);
                     in = new FileInputStream(assetFile);
-                    FLog.v(TAG, "Located pre-populated DB asset in Files subdirectory: " + assetFile.getCanonicalPath());
+                    Log.v("info", "Located pre-populated DB asset in Files subdirectory: " + assetFile.getCanonicalPath());
                     if (openFlags == SQLiteDatabase.OPEN_READONLY) {
                         dbfile = assetFile;
-                        FLog.v(TAG, "Detected read-only mode request for external asset.");
+                        Log.v("info", "Detected read-only mode request for external asset.");
                     }
                 }
             }
@@ -404,7 +413,7 @@ public class SQLitePlugin extends ReactContextBaseJavaModule {
                 dbfile = this.getContext().getDatabasePath(dbname);
 
                 if (!dbfile.exists() && in != null) {
-                    FLog.v(TAG, "Copying pre-populated db asset to destination");
+                    Log.v("info", "Copying pre-populated db asset to destination");
                     this.createFromAssets(dbname, dbfile, in);
                 }
 
@@ -413,7 +422,7 @@ public class SQLitePlugin extends ReactContextBaseJavaModule {
                 }
             }
 
-            FLog.v(TAG, "Opening sqlite db: " + dbfile.getAbsolutePath());
+            Log.v("info", "Opening sqlite db: " + dbfile.getAbsolutePath());
 
             SQLiteDatabase mydb = SQLiteDatabase.openDatabase(dbfile.getAbsolutePath(), null, openFlags);
 
@@ -426,7 +435,12 @@ public class SQLitePlugin extends ReactContextBaseJavaModule {
                 cbc.error("can't open database " + ex);
             throw ex;
         } finally {
-           closeQuietly(in);
+            if (in != null) {
+                try {
+                    in.close();
+                } catch (IOException ignored) {
+                }
+            }
         }
     }
 
@@ -442,7 +456,7 @@ public class SQLitePlugin extends ReactContextBaseJavaModule {
         OutputStream out = null;
 
         try {
-            FLog.v(TAG, "Copying pre-populated DB content");
+            Log.v("info", "Copying pre-populated DB content");
             String dbPath = dbfile.getAbsolutePath();
             dbPath = dbPath.substring(0, dbPath.lastIndexOf("/") + 1);
 
@@ -460,11 +474,16 @@ public class SQLitePlugin extends ReactContextBaseJavaModule {
             while ((len = assetFileInputStream.read(buf)) > 0)
                 out.write(buf, 0, len);
 
-            FLog.v(TAG, "Copied pre-populated DB content to: " + newDbFile.getAbsolutePath());
+            Log.v("info", "Copied pre-populated DB content to: " + newDbFile.getAbsolutePath());
         } catch (IOException e) {
-            FLog.e(TAG, "No pre-populated DB found.", e);
+            Log.v("createFromAssets", "No pre-populated DB found, error=" + e.getMessage());
         } finally {
-            closeQuietly(out);
+            if (out != null) {
+                try {
+                    out.close();
+                } catch (IOException ignored) {
+                }
+            }
         }
     }
 
@@ -483,7 +502,7 @@ public class SQLitePlugin extends ReactContextBaseJavaModule {
                 if (cbc != null) {
                     cbc.error("couldn't close database" + e);
                 }
-                FLog.e(TAG, "couldn't close database", e);
+                Log.e(SQLitePlugin.class.getSimpleName(), "couldn't close database", e);
             }
         } else {
             if (cbc != null) {
@@ -514,21 +533,34 @@ public class SQLitePlugin extends ReactContextBaseJavaModule {
      * @param cbc - JS callback
      */
     private void attachDatabase(String dbName, String dbNameToAttach, String dbAlias, CallbackContext cbc) {
-        DBRunner runner = dbrmap.get(dbName);
-        if (runner != null) {
-            File databasePath = this.getContext().getDatabasePath(dbNameToAttach);
-            String filePathToAttached = databasePath.getAbsolutePath();
-            String statement = "ATTACH DATABASE '" + filePathToAttached + "' AS " + dbAlias;
-            // TODO: get rid of qid as it's just hardcoded to 1111 in js layer
-            DBQuery query = new DBQuery(new String [] {statement},
-                    new String[] {"1111"}, new JSONArray[] {new JSONArray()}, cbc);
-            try {
-                runner.q.put(query);
-            } catch (InterruptedException e) {
-                cbc.error("Can't put query in the queue. Interrupted.");
-            }
-        } else {
-            cbc.error("Database " + dbName + "i s not created yet");
+        SQLiteDatabase currentDb = this.getDatabase(dbName);
+        SQLiteDatabase attachDb = this.getDatabase(dbNameToAttach);
+
+        if (currentDb == null || ! currentDb.isOpen()) {
+            if (cbc != null) cbc.error("Database " + dbName + " is not open");
+            return;
+        }
+
+        if (attachDb == null || ! attachDb.isOpen()) {
+            if (cbc != null) cbc.error("Database to attach (" + dbNameToAttach + ") is not open");
+            return;
+        }
+
+        File dbfile = this.getContext().getDatabasePath(dbNameToAttach);
+        String filePathToAttached = dbfile.getAbsolutePath();
+
+        String stmt = "ATTACH DATABASE '" + filePathToAttached + "' AS " + dbAlias;
+        try {
+            this.executeSqlStatementQuery( currentDb, stmt, new JSONArray(), cbc );
+            // if this previous statement fails, it will throw an exception
+            // otherwise it will never call the success handler because no valid
+            // cursor will be return from rawQuery.
+            // That's why we have to call the success handler here
+            if(cbc != null) cbc.success();            
+        }
+        catch(Exception e) {
+            Log.e("attachDatabase", "" + e.getMessage());
+            if(cbc != null) cbc.error("Attach failed");
         }
     }
 
@@ -546,7 +578,7 @@ public class SQLitePlugin extends ReactContextBaseJavaModule {
                 if (cbc != null) {
                     cbc.error("couldn't close database" + e);
                 }
-                FLog.e(TAG, "couldn't close database", e);
+                Log.e(SQLitePlugin.class.getSimpleName(), "couldn't close database", e);
             }
         } else {
             boolean deleteResult = this.deleteDatabaseNow(dbname);
@@ -568,7 +600,27 @@ public class SQLitePlugin extends ReactContextBaseJavaModule {
     @SuppressLint("NewApi")
     private boolean deleteDatabaseNow(String dbname) {
         File dbfile = this.getContext().getDatabasePath(dbname);
-        return android.database.sqlite.SQLiteDatabase.deleteDatabase(dbfile);
+        if (android.os.Build.VERSION.SDK_INT >= 11) {
+            // Use try & catch just in case android.os.Build.VERSION.SDK_INT >= 16 was lying:
+            try {
+                return SQLiteDatabase.deleteDatabase(dbfile);
+            } catch (Exception e) {
+                Log.e(SQLitePlugin.class.getSimpleName(), "couldn't delete because old SDK_INT", e);
+                return deleteDatabasePreHoneycomb(dbfile);
+            }
+        } else {
+            // use old API
+            return deleteDatabasePreHoneycomb(dbfile);
+        }
+    }
+
+    private boolean deleteDatabasePreHoneycomb(File dbfile) {
+        try {
+            return this.getContext().deleteDatabase(dbfile.getAbsolutePath());
+        } catch (Exception e) {
+            Log.e(SQLitePlugin.class.getSimpleName(), "couldn't delete database", e);
+            return false;
+        }
     }
 
     /**
@@ -602,12 +654,15 @@ public class SQLitePlugin extends ReactContextBaseJavaModule {
             return;
         }
 
+
         String query;
         String query_id;
         int len = queryarr.length;
         JSONArray batchResults = new JSONArray();
 
         for (int i = 0; i < len; i++) {
+            int rowsAffectedCompat = 0;
+            boolean needRowsAffectedCompat = false;
             query_id = queryIDs[i];
 
             JSONObject queryResult = null;
@@ -621,30 +676,38 @@ public class SQLitePlugin extends ReactContextBaseJavaModule {
                 QueryType queryType = getQueryType(query);
 
                 if (queryType == QueryType.update || queryType == QueryType.delete) {
-                    SQLiteStatement myStatement = null;
-                    int rowsAffected = -1; // (assuming invalid)
+                    if (android.os.Build.VERSION.SDK_INT >= 11) {
+                        SQLiteStatement myStatement = mydb.compileStatement(query);
 
-                    try {
-                        myStatement = mydb.compileStatement(query);
                         if (jsonparams != null) {
                             bindArgsToStatement(myStatement, jsonparams[i]);
                         }
 
-                        rowsAffected = myStatement.executeUpdateDelete();
-                        // Indicate valid results:
-                        needRawQuery = false;
-                    } catch (SQLiteException ex) {
-                        // Indicate problem & stop this query:
-                        errorMessage = ex.getMessage();
-                        FLog.e(TAG, "SQLiteStatement.executeUpdateDelete() failed", ex);
-                        needRawQuery = false;
-                    } finally {
-                        closeQuietly(myStatement);
-                    }
+                        int rowsAffected = -1; // (assuming invalid)
 
-                    if (rowsAffected != -1) {
-                        queryResult = new JSONObject();
-                        queryResult.put("rowsAffected", rowsAffected);
+                        // Use try & catch just in case android.os.Build.VERSION.SDK_INT >= 11 is lying:
+                        try {
+                            rowsAffected = myStatement.executeUpdateDelete();
+                            // Indicate valid results:
+                            needRawQuery = false;
+                        } catch (SQLiteException ex) {
+                            // Indicate problem & stop this query:
+                            ex.printStackTrace();
+                            errorMessage = ex.getMessage();
+                            Log.v("executeSqlBatch", "SQLiteStatement.executeUpdateDelete(): Error=" + errorMessage);
+                            needRawQuery = false;
+                        } catch (Exception ex) {
+                            // Assuming SDK_INT was lying & method not found:
+                            // do nothing here & try again with raw query.
+                        }
+
+                        if (rowsAffected != -1) {
+                            queryResult = new JSONObject();
+                            queryResult.put("rowsAffected", rowsAffected);
+                        }
+                    } else { // pre-honeycomb
+                        rowsAffectedCompat = countRowsAffectedCompat(queryType, query, jsonparams, mydb, i);
+                        needRowsAffectedCompat = true;
                     }
                 }
 
@@ -672,10 +735,9 @@ public class SQLitePlugin extends ReactContextBaseJavaModule {
                     } catch (SQLiteException ex) {
                         // report error result with the error message
                         // could be constraint violation or some other error
+                        ex.printStackTrace();
                         errorMessage = ex.getMessage();
-                        FLog.e(TAG, "SQLiteDatabase.executeInsert() failed", ex);
-                    } finally {
-                       closeQuietly(myStatement);
+                        Log.v("executeSqlBatch", "SQLiteDatabase.executeInsert(): Error=" + errorMessage);
                     }
                 }
 
@@ -687,8 +749,9 @@ public class SQLitePlugin extends ReactContextBaseJavaModule {
                         queryResult = new JSONObject();
                         queryResult.put("rowsAffected", 0);
                     } catch (SQLiteException ex) {
+                        ex.printStackTrace();
                         errorMessage = ex.getMessage();
-                        FLog.e(TAG, "SQLiteDatabase.beginTransaction() failed", ex);
+                        Log.v("executeSqlBatch", "SQLiteDatabase.beginTransaction(): Error=" + errorMessage);
                     }
                 }
 
@@ -701,8 +764,9 @@ public class SQLitePlugin extends ReactContextBaseJavaModule {
                         queryResult = new JSONObject();
                         queryResult.put("rowsAffected", 0);
                     } catch (SQLiteException ex) {
+                        ex.printStackTrace();
                         errorMessage = ex.getMessage();
-                        FLog.e(TAG, "SQLiteDatabase.setTransactionSuccessful/endTransaction() failed", ex);
+                        Log.v("executeSqlBatch", "SQLiteDatabase.setTransactionSuccessful/endTransaction(): Error=" + errorMessage);
                     }
                 }
 
@@ -714,18 +778,24 @@ public class SQLitePlugin extends ReactContextBaseJavaModule {
                         queryResult = new JSONObject();
                         queryResult.put("rowsAffected", 0);
                     } catch (SQLiteException ex) {
+                        ex.printStackTrace();
                         errorMessage = ex.getMessage();
-                        FLog.e(TAG, "SQLiteDatabase.endTransaction() failed", ex);
+                        Log.v("executeSqlBatch", "SQLiteDatabase.endTransaction(): Error=" + errorMessage);
                     }
                 }
 
                 // raw query for other statements:
                 if (needRawQuery) {
                     queryResult = this.executeSqlStatementQuery(mydb, query, jsonparams[i], cbc);
+
+                    if (needRowsAffectedCompat) {
+                        queryResult.put("rowsAffected", rowsAffectedCompat);
+                    }
                 }
             } catch (Exception ex) {
+                ex.printStackTrace();
                 errorMessage = ex.getMessage();
-                FLog.e(TAG, "SQLitePlugin.executeSql[Batch](): failed", ex);
+                Log.v("executeSqlBatch", "SQLitePlugin.executeSql[Batch](): Error=" + errorMessage);
             }
 
             try {
@@ -749,18 +819,94 @@ public class SQLitePlugin extends ReactContextBaseJavaModule {
                     batchResults.put(r);
                 }
             } catch (JSONException ex) {
-                FLog.e(TAG, "SQLitePlugin.executeSql[Batch]() failed", ex);
+                ex.printStackTrace();
+                Log.v("executeSqlBatch", "SQLitePlugin.executeSql[Batch](): Error=" + ex.getMessage());
             }
         }
 
         cbc.success(batchResults);
     }
 
+    private int countRowsAffectedCompat(QueryType queryType, String query, JSONArray[] jsonparams,
+                                        SQLiteDatabase mydb, int i) throws JSONException {
+        // quick and dirty way to calculate the rowsAffected in pre-Honeycomb.  just do a SELECT
+        // beforehand using the same WHERE clause. might not be perfect, but it's better than nothing
+        Matcher whereMatcher = WHERE_CLAUSE.matcher(query);
+
+        String where = "";
+
+        int pos = 0;
+        while (whereMatcher.find(pos)) {
+            where = " WHERE " + whereMatcher.group(1);
+            pos = whereMatcher.start(1);
+        }
+        // WHERE clause may be omitted, and also be sure to find the last one,
+        // e.g. for cases where there's a subquery
+
+        // bindings may be in the update clause, so only take the last n
+        int numQuestionMarks = 0;
+        for (int j = 0; j < where.length(); j++) {
+            if (where.charAt(j) == '?') {
+                numQuestionMarks++;
+            }
+        }
+
+        JSONArray subParams = null;
+
+        if (jsonparams != null) {
+            // only take the last n of every array of sqlArgs
+            JSONArray origArray = jsonparams[i];
+            subParams = new JSONArray();
+            int startPos = origArray.length() - numQuestionMarks;
+            for (int j = startPos; j < origArray.length(); j++) {
+                subParams.put(j - startPos, origArray.get(j));
+            }
+        }
+
+        if (queryType == QueryType.update) {
+            Matcher tableMatcher = UPDATE_TABLE_NAME.matcher(query);
+            if (tableMatcher.find()) {
+                String table = tableMatcher.group(1);
+                try {
+                    SQLiteStatement statement = mydb.compileStatement(
+                            "SELECT count(*) FROM " + table + where);
+
+                    if (subParams != null) {
+                        bindArgsToStatement(statement, subParams);
+                    }
+
+                    return (int)statement.simpleQueryForLong();
+                } catch (Exception e) {
+                    // assume we couldn't count for whatever reason, keep going
+                    Log.e(SQLitePlugin.class.getSimpleName(), "uncaught", e);
+                }
+            }
+        } else { // delete
+            Matcher tableMatcher = DELETE_TABLE_NAME.matcher(query);
+            if (tableMatcher.find()) {
+                String table = tableMatcher.group(1);
+                try {
+                    SQLiteStatement statement = mydb.compileStatement(
+                            "SELECT count(*) FROM " + table + where);
+                    bindArgsToStatement(statement, subParams);
+
+                    return (int)statement.simpleQueryForLong();
+                } catch (Exception e) {
+                    // assume we couldn't count for whatever reason, keep going
+                    Log.e(SQLitePlugin.class.getSimpleName(), "uncaught", e);
+
+                }
+            }
+        }
+
+        return 0;
+    }
+
     private QueryType getQueryType(String query) {
         Matcher matcher = FIRST_WORD.matcher(query);
         if (matcher.find()) {
             try {
-                return QueryType.valueOf(matcher.group(1).toLowerCase(Locale.US));
+                return QueryType.valueOf(matcher.group(1).toLowerCase());
             } catch (IllegalArgumentException ignore) {
                 // unknown verb
             }
@@ -797,64 +943,76 @@ public class SQLitePlugin extends ReactContextBaseJavaModule {
                                                 CallbackContext cbc) throws Exception {
         JSONObject rowsResult = new JSONObject();
 
-        Cursor cur = null;
+        Cursor cur;
         try {
-            try {
-                String[] params;
+            String[] params;
 
-                params = new String[paramsAsJson.length()];
+            params = new String[paramsAsJson.length()];
 
-                for (int j = 0; j < paramsAsJson.length(); j++) {
-                    if (paramsAsJson.isNull(j)) {
-                        params[j] = "";
-                    } else {
-                        params[j] = paramsAsJson.getString(j);
-                    }
-                }
-
-                cur = mydb.rawQuery(query, params);
-            } catch (Exception ex) {
-                FLog.e(TAG, "SQLitePlugin.executeSql[Batch]() failed", ex);
-                throw ex;
+            for (int j = 0; j < paramsAsJson.length(); j++) {
+                if (paramsAsJson.isNull(j))
+                    params[j] = "";
+                else
+                    params[j] = paramsAsJson.getString(j);
             }
 
-            // If query result has rows
-            if (cur != null && cur.moveToFirst()) {
-                JSONArray rowsArrayResult = new SQLiteArray(cur.getCount());
-                String key;
-                int colCount = cur.getColumnCount();
+            cur = mydb.rawQuery(query, params);
+        } catch (Exception ex) {
+            ex.printStackTrace();
+            String errorMessage = ex.getMessage();
+            Log.v("executeSqlBatch", "SQLitePlugin.executeSql[Batch](): Error=" + errorMessage);
+            throw ex;
+        }
 
-                // Build up JSON result object for each row
-                do {
-                    JSONObject row = new SQLiteObject(colCount);
-                    try {
-                        for (int i = 0; i < colCount; ++i) {
-                            key = cur.getColumnName(i);
-                            bindRow(row, key, cur, i);
-                        }
+        // If query result has rows
+        if (cur != null && cur.moveToFirst()) {
+            JSONArray rowsArrayResult = new SQLiteArray(cur.getCount());
+            String key;
+            int colCount = cur.getColumnCount();
 
-                        rowsArrayResult.put(row);
-
-                    } catch (JSONException e) {
-                        FLog.e(TAG, e.getMessage(), e);
-                    }
-                } while (cur.moveToNext());
-
+            // Build up JSON result object for each row
+            do {
+                JSONObject row = new SQLiteObject(colCount);
                 try {
-                    rowsResult.put("rows", rowsArrayResult);
+                    for (int i = 0; i < colCount; ++i) {
+                        key = cur.getColumnName(i);
+
+                        if (android.os.Build.VERSION.SDK_INT >= 11) {
+
+                            // Use try & catch just in case android.os.Build.VERSION.SDK_INT >= 11 is lying:
+                            try {
+                                bindPostHoneycomb(row, key, cur, i);
+                            } catch (Exception ex) {
+                                bindPreHoneycomb(row, key, cur, i);
+                            }
+                        } else {
+                            bindPreHoneycomb(row, key, cur, i);
+                        }
+                    }
+
+                    rowsArrayResult.put(row);
+
                 } catch (JSONException e) {
-                   FLog.e(TAG, e.getMessage(), e);
+                    e.printStackTrace();
                 }
+            } while (cur.moveToNext());
+
+            try {
+                rowsResult.put("rows", rowsArrayResult);
+            } catch (JSONException e) {
+                e.printStackTrace();
             }
-        } finally {
-            closeQuietly(cur);
+        }
+
+        if (cur != null) {
+            cur.close();
         }
 
         return rowsResult;
     }
 
     @SuppressLint("NewApi")
-    private void bindRow(JSONObject row, String key, Cursor cur, int i) throws JSONException {
+    private void bindPostHoneycomb(JSONObject row, String key, Cursor cur, int i) throws JSONException {
         int curType = cur.getType(i);
 
         switch (curType) {
@@ -877,13 +1035,23 @@ public class SQLitePlugin extends ReactContextBaseJavaModule {
         }
     }
 
-    private void closeQuietly(Closeable closeable) {
-        if (closeable != null) {
-            try {
-                closeable.close();
-            } catch (IOException e) {
-                // ignore
-            }
+    private void bindPreHoneycomb(JSONObject row, String key, Cursor cursor, int i) throws JSONException {
+        // Since cursor.getType() is not available pre-honeycomb, this is
+        // a workaround so we don't have to bind everything as a string
+        // Details here: http://stackoverflow.com/q/11658239
+        SQLiteCursor sqLiteCursor = (SQLiteCursor) cursor;
+        CursorWindow cursorWindow = sqLiteCursor.getWindow();
+        int pos = cursor.getPosition();
+        if (cursorWindow.isNull(pos, i)) {
+            row.put(key, JSONObject.NULL);
+        } else if (cursorWindow.isLong(pos, i)) {
+            row.put(key, cursor.getLong(i));
+        } else if (cursorWindow.isFloat(pos, i)) {
+            row.put(key, cursor.getDouble(i));
+        } else if (cursorWindow.isBlob(pos, i)) {
+            row.put(key, new String(Base64.encode(cursor.getBlob(i), Base64.DEFAULT)));
+        } else { // string
+            row.put(key, cursor.getString(i));
         }
     }
 
@@ -907,12 +1075,12 @@ public class SQLitePlugin extends ReactContextBaseJavaModule {
                     openFlags = readOnly ? SQLiteDatabase.OPEN_READONLY : openFlags;
                 }
             } catch (Exception ex){
-                FLog.e(TAG,"Error retrieving assetFilename this.mode from options:",ex);
+                Log.v(SQLitePlugin.class.getSimpleName(),"Error retrieving assetFilename this.mode from options:",ex);
             }
             this.openFlags = openFlags;
             this.androidLockWorkaround = options.has("androidLockWorkaround");
             if (this.androidLockWorkaround)
-                FLog.i(TAG, "Android db closing/locking workaround applied");
+                Log.v(SQLitePlugin.class.getSimpleName(), "Android db closing/locking workaround applied");
 
             this.q = new LinkedBlockingQueue<DBQuery>();
             this.openCbc = cbc;
@@ -922,7 +1090,7 @@ public class SQLitePlugin extends ReactContextBaseJavaModule {
             try {
                 this.mydb = openDatabase(dbname, this.assetFilename, this.openFlags, this.openCbc);
             } catch (Exception e) {
-                FLog.e(TAG, "unexpected error, stopping db thread", e);
+                Log.e(SQLitePlugin.class.getSimpleName(), "unexpected error, stopping db thread", e);
                 dbrmap.remove(dbname);
                 return;
             }
@@ -937,16 +1105,16 @@ public class SQLitePlugin extends ReactContextBaseJavaModule {
 
                     // XXX workaround for Android locking/closing issue:
                     if (androidLockWorkaround && dbq.queries.length == 1 && dbq.queries[0].equals("COMMIT")) {
-                        // FLog.v(TAG, "close and reopen db");
+                        // Log.v(SQLitePlugin.class.getSimpleName(), "close and reopen db");
                         closeDatabaseNow(dbname);
                         this.mydb = openDatabase(dbname, "", this.openFlags, null);
-                        // FLog.v(TAG, "close and reopen db finished");
+                        // Log.v(SQLitePlugin.class.getSimpleName(), "close and reopen db finished");
                     }
 
                     dbq = q.take();
                 }
             } catch (Exception e) {
-                FLog.e(TAG, "unexpected error", e);
+                Log.e(SQLitePlugin.class.getSimpleName(), "unexpected error", e);
             }
 
             if (dbq != null && dbq.close) {
@@ -966,12 +1134,12 @@ public class SQLitePlugin extends ReactContextBaseJavaModule {
                                 dbq.cbc.error("couldn't delete database");
                             }
                         } catch (Exception e) {
-                            FLog.e(TAG, "couldn't delete database", e);
+                            Log.e(SQLitePlugin.class.getSimpleName(), "couldn't delete database", e);
                             dbq.cbc.error("couldn't delete database: " + e);
                         }
                     }
                 } catch (Exception e) {
-                    FLog.e(TAG, "couldn't close database", e);
+                    Log.e(SQLitePlugin.class.getSimpleName(), "couldn't close database", e);
                     if (dbq.cbc != null) {
                         dbq.cbc.error("couldn't close database: " + e);
                     }

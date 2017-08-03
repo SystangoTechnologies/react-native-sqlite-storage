@@ -2,13 +2,12 @@
 
 'use strict';
 
-require('react-native/setupBabel')();
 var fs = require('fs');
-var cli = require('react-native/local-cli/core');
+var rnpm = require('rnpm/src/config');
 var xcode = require('xcode');
 
 // The current working directory should be project root of the app that is linking react-native-sqlite.
-var config = cli.getProjectConfig();
+var config = rnpm.getProjectConfig();
 
 if (config.ios) {
     var pbxproj = config.ios.pbxprojPath;

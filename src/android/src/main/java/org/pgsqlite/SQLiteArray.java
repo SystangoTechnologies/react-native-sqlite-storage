@@ -1,7 +1,5 @@
 package org.pgsqlite;
 
-import com.facebook.common.logging.FLog;
-
 import org.json.JSONArray;
 
 import java.lang.reflect.Field;
@@ -24,9 +22,9 @@ public class SQLiteArray extends JSONArray {
             valuesField.setAccessible(true);
             valuesField.set(this, new ArrayList<>(size));
         } catch (NoSuchFieldException e) {
-            FLog.e(SQLitePlugin.TAG, e.getMessage(), e);
+            e.printStackTrace();
         } catch (IllegalAccessException e) {
-            FLog.e(SQLitePlugin.TAG, e.getMessage(), e);
+            e.printStackTrace();
         }
     }
 

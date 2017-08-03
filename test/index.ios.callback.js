@@ -1,37 +1,32 @@
 /**
- * sqlite.ios.callback.js
+ * Sample React Native App with SQLite
+ * Demo the react-native-sqlite-storage
+ * 
  *
- * Created by Andrzej Porebski on 10/29/15.
- * Copyright (c) 2015 Andrzej Porebski.
- *
- * Test App using JS Callbacks for react-naive-sqlite-storage
- *
- * This library is available under the terms of the MIT License (2008).
- * See http://opensource.org/licenses/alphabetical for full text.
  */
 'use strict';
 
-import React, { Component } from 'react';
-import {
-    AppRegistry,
-    StyleSheet,
-    Text,
-    View,
-    ListView
-} from 'react-native';
-
-
-import SQLite from 'react-native-sqlite-storage';
+var React = require('react-native');
+var SQLite = require('react-native-sqlite-storage');
 SQLite.DEBUG(true);
+SQLite.enablePromise(true);
 SQLite.enablePromise(false);
 
-const database_name = "Test.db";
-const database_version = "1.0";
-const database_displayname = "SQLite Test Database";
-const database_size = 200000;
-let db;
+var {
+  AppRegistry,
+  StyleSheet,
+  Text,
+  View,
+  ListView
+} = React;
 
-const SQLiteDemo = React.createClass({
+var database_name = "Test.db";
+var database_version = "1.0";
+var database_displayname = "SQLite Test Database";
+var database_size = 200000;
+var db;
+
+var SQLiteDemo = React.createClass({
     getInitialState(){
         return {
             progress: [],
@@ -204,7 +199,7 @@ const SQLiteDemo = React.createClass({
     },
 
     runDemo(){
-        this.state.progress = ["Starting SQLite Callback Demo"];
+        this.state.progress = ["Starting SQLite Demo"];
         this.setState(this.state);
         this.loadAndQueryDB();
     },
@@ -212,7 +207,7 @@ const SQLiteDemo = React.createClass({
     renderProgressEntry(entry){
         return (<View style={listStyles.li}>
             <View>
-                <Text style={listStyles.liText}>{entry}</Text>
+                <Text style={listStyles.title}>{entry}</Text>
             </View>
         </View>)
     },
@@ -232,7 +227,6 @@ const SQLiteDemo = React.createClass({
                 </Text>
             </View>
             <ListView
-                enableEmptySections={true}
                 dataSource={ds.cloneWithRows(this.state.progress)}
                 renderRow={this.renderProgressEntry}
                 style={listStyles.liContainer}/>
@@ -298,4 +292,4 @@ var styles = StyleSheet.create({
   }
 });
 
-AppRegistry.registerComponent('AwesomeProject', () => SQLiteDemo);
+AppRegistry.registerComponent('SQLiteDemo', () => SQLiteDemo);
